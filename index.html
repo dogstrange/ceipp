@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Map-Matching Simulation</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  header {
+    padding: 10px 20px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 1rem; font-weight: 600; letter-spacing: 0.03em; }
+  header .badge {
+    font-size: 0.7rem; padding: 2px 8px; border-radius: 20px;
+    background: #1f6feb; color: #fff;
+  }
+
+  .controls {
+    display: flex; gap: 12px; margin-left: auto; align-items: center;
+  }
+  .toggle-btn {
+    background: #21262d; border: 1px solid #30363d; color: #e6edf3;
+    padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 0.78rem;
+    transition: background 0.15s;
+  }
+  .toggle-btn:hover { background: #30363d; }
+  .toggle-btn.active { background: #1f6feb; border-color: #1f6feb; }
+
+  .status-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: #3fb950; box-shadow: 0 0 6px #3fb950;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ---- Canvas panel ---- */
+  .canvas-wrap {
+    flex: 1;
+    position: relative;
+    background: #0d1117;
+    overflow: hidden;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ---- Sidebar ---- */
+  .sidebar {
+    width: 280px;
+    background: #161b22;
+    border-left: 1px solid #30363d;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 10px 14px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #7d8590;
+    border-bottom: 1px solid #30363d;
+    flex-shrink: 0;
+  }
+  .road-list {
+    overflow-y: auto;
+    flex: 1;
+  }
+  .road-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #1c2128;
+    font-size: 0.78rem;
+  }
+  .road-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .road-name { flex: 1; font-weight: 500; }
+  .road-speed { font-variant-numeric: tabular-nums; color: #7d8590; }
+  .road-badge {
+    font-size: 0.65rem; padding: 1px 6px; border-radius: 10px;
+    font-weight: 600; text-transform: uppercase;
+  }
+  .badge-tollway { background: #4b2a8a; color: #d2a8ff; }
+  .badge-main    { background: #0e3a4f; color: #79c0ff; }
+  .badge-sub     { background: #1a3626; color: #56d364; }
+
+  .legend {
+    padding: 10px 14px;
+    border-top: 1px solid #30363d;
+    font-size: 0.72rem;
+    color: #7d8590;
+    flex-shrink: 0;
+  }
+  .legend-row { display: flex; gap: 10px; margin-bottom: 4px; align-items: center; }
+  .legend-swatch {
+    width: 24px; height: 4px; border-radius: 2px; flex-shrink: 0;
+  }
+
+  .tooltip {
+    position: absolute;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 10;
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="statusDot"></div>
+  <h1>Map-Matching Simulation</h1>
+  <span class="badge">Live</span>
+  <div class="controls">
+    <button class="toggle-btn active" id="btnSmooth" onclick="toggleLayer('smooth')">Smoothed (Kalman)</button>
+    <button class="toggle-btn active" id="btnRaw"    onclick="toggleLayer('raw')">Raw GPS</button>
+    <button class="toggle-btn active" id="btnSnap"   onclick="toggleLayer('snap')">Snapped (HMM)</button>
+    <button class="toggle-btn active" id="btnLabels" onclick="toggleLayer('labels')">Speed Labels</button>
+  </div>
+</header>
+
+<div class="main">
+  <div class="canvas-wrap" id="canvasWrap">
+    <canvas id="map"></canvas>
+    <div class="tooltip" id="tooltip"></div>
+  </div>
+  <aside class="sidebar">
+    <div class="sidebar-header">Road Traffic</div>
+    <div class="road-list" id="roadList"></div>
+    <div class="legend">
+      <div class="legend-row"><div class="legend-swatch" style="background:#3fb950"></div> ≥ 60 km/h – Free flow</div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#d29922"></div> 20–60 km/h – Moderate</div>
+      <div class="legend-row"><div class="legend-swatch" style="background:#f85149"></div> ≤ 20 km/h – Congested</div>
+      <div class="legend-row" style="margin-top:6px">
+        <canvas width="20" height="10" id="legendRaw" style="border-radius:2px"></canvas> Raw GPS
+      </div>
+      <div class="legend-row">
+        <canvas width="20" height="10" id="legendSmooth" style="border-radius:2px"></canvas> Kalman smoothed
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+// ============================================================
+// Constants & state
+// ============================================================
+const API      = '';         // same origin
+const POLL_MS  = 1500;
+const PAD      = 40;         // canvas padding
+
+const COLORS = {
+  green:  '#3fb950',
+  yellow: '#d29922',
+  red:    '#f85149',
+};
+const ROAD_WIDTH = { tollway: 8, main: 5, sub: 3 };
+const ROAD_STROKE = { tollway: '#58a6ff', main: '#79c0ff', sub: '#a5d6ff' };
+
+let mapData     = null;    // {nodes, edges}
+let vehicles    = [];
+let traffic     = {};      // edge_id → segment data
+
+let layers = { smooth: true, raw: true, snap: true, labels: true };
+
+function toggleLayer(k) {
+  layers[k] = !layers[k];
+  document.getElementById('btn' + k.charAt(0).toUpperCase() + k.slice(1))
+           .classList.toggle('active', layers[k]);
+}
+
+// ============================================================
+// Canvas helpers
+// ============================================================
+const canvas = document.getElementById('map');
+const ctx    = canvas.getContext('2d');
+
+let scale = 1, offX = PAD, offY = PAD;   // world-to-canvas transform
+
+function resize() {
+  const wrap = document.getElementById('canvasWrap');
+  canvas.width  = wrap.clientWidth;
+  canvas.height = wrap.clientHeight;
+  if (mapData) computeTransform();
+  render();
+}
+
+function computeTransform() {
+  // Find bounding box of all nodes
+  const xs = mapData.nodes.map(n => n.x);
+  const ys = mapData.nodes.map(n => n.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const worldW = maxX - minX || 1;
+  const worldH = maxY - minY || 1;
+  const drawW  = canvas.width  - PAD * 2;
+  const drawH  = canvas.height - PAD * 2;
+  scale = Math.min(drawW / worldW, drawH / worldH);
+  // Center the map
+  offX = PAD + (drawW - worldW * scale) / 2 - minX * scale;
+  offY = PAD + (drawH - worldH * scale) / 2 - minY * scale;
+}
+
+// World → canvas  (Y is flipped so higher Y is visually up)
+function wx(x) { return offX + x * scale; }
+function wy(y) { return canvas.height - (offY + y * scale); }
+
+// ============================================================
+// Rendering
+// ============================================================
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!mapData) return;
+
+  // -- 1. Road segments -----------------------------------------
+  for (const edge of mapData.edges) {
+    const seg  = traffic[edge.edge_id];
+    const color = seg ? COLORS[seg.color] : ROAD_STROKE[edge.road_type];
+    const lw    = (ROAD_WIDTH[edge.road_type] || 4) * Math.max(scale / 200, 0.5);
+
+    ctx.beginPath();
+    ctx.moveTo(wx(edge.ax), wy(edge.ay));
+    ctx.lineTo(wx(edge.bx), wy(edge.by));
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = lw;
+    ctx.lineCap     = 'round';
+    ctx.stroke();
+
+    // Speed label
+    if (layers.labels && seg) {
+      const mx = wx((edge.ax + edge.bx) / 2);
+      const my = wy((edge.ay + edge.by) / 2);
+      ctx.font      = `bold ${Math.max(9, 11 * scale / 200)}px 'Segoe UI', sans-serif`;
+      ctx.fillStyle = '#e6edf3';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      // tiny background pill
+      const txt   = `${seg.avg_speed_kmh} km/h`;
+      const tw    = ctx.measureText(txt).width;
+      const th    = 12;
+      ctx.fillStyle = 'rgba(13,17,23,0.75)';
+      ctx.beginPath();
+      ctx.roundRect(mx - tw/2 - 3, my - th/2 - 1, tw + 6, th + 2, 3);
+      ctx.fill();
+      ctx.fillStyle = color;
+      ctx.fillText(txt, mx, my);
+    }
+  }
+
+  // -- 2. Intersection nodes ------------------------------------
+  for (const node of mapData.nodes) {
+    ctx.beginPath();
+    ctx.arc(wx(node.x), wy(node.y), Math.max(3, 4 * scale / 200), 0, Math.PI * 2);
+    ctx.fillStyle   = '#30363d';
+    ctx.strokeStyle = '#58a6ff';
+    ctx.lineWidth   = 1;
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // -- 3. Snap lines (HMM matched position) ----------------------
+  if (layers.snap) {
+    for (const v of vehicles) {
+      if (v.matched_edge_id == null || v.matched_edge_id === -1) continue;
+      const edge = mapData.edges.find(e => e.edge_id === v.matched_edge_id);
+      if (!edge) continue;
+      // Project smooth pos onto edge to get snap point
+      const snap = projectOntoEdge(v.smooth_x, v.smooth_y, edge);
+      ctx.beginPath();
+      ctx.moveTo(wx(v.smooth_x), wy(v.smooth_y));
+      ctx.lineTo(wx(snap.x), wy(snap.y));
+      ctx.strokeStyle = 'rgba(255,255,100,0.4)';
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // -- 4. Raw GPS points ----------------------------------------
+  if (layers.raw) {
+    for (const v of vehicles) {
+      ctx.beginPath();
+      ctx.arc(wx(v.raw_x), wy(v.raw_y), 4, 0, Math.PI * 2);
+      ctx.fillStyle   = 'rgba(248,81,73,0.45)';
+      ctx.strokeStyle = 'rgba(248,81,73,0.7)';
+      ctx.lineWidth   = 1;
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // -- 5. Smoothed vehicle markers (arrows) ----------------------
+  if (layers.smooth) {
+    for (const v of vehicles) {
+      drawVehicle(v);
+    }
+  }
+}
+
+function projectOntoEdge(px, py, edge) {
+  const dx = edge.bx - edge.ax, dy = edge.by - edge.ay;
+  const lenSq = dx*dx + dy*dy;
+  if (lenSq === 0) return { x: edge.ax, y: edge.ay };
+  const t = Math.max(0, Math.min(1, ((px-edge.ax)*dx + (py-edge.ay)*dy) / lenSq));
+  return { x: edge.ax + t*dx, y: edge.ay + t*dy };
+}
+
+function drawVehicle(v) {
+  const cx = wx(v.smooth_x);
+  const cy = wy(v.smooth_y);
+  const r  = 7;
+  const heading = -v.heading_deg * Math.PI / 180;  // canvas Y is flipped
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(heading);
+
+  // Body circle
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, Math.PI * 2);
+  ctx.fillStyle   = '#1f6feb';
+  ctx.strokeStyle = '#58a6ff';
+  ctx.lineWidth   = 1.5;
+  ctx.fill();
+  ctx.stroke();
+
+  // Direction arrow
+  ctx.beginPath();
+  ctx.moveTo(r + 2, 0);
+  ctx.lineTo(r + 8, -3);
+  ctx.lineTo(r + 8,  3);
+  ctx.closePath();
+  ctx.fillStyle = '#58a6ff';
+  ctx.fill();
+
+  ctx.restore();
+
+  // Vehicle label
+  ctx.font      = 'bold 9px monospace';
+  ctx.fillStyle = '#e6edf3';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(v.vehicle_id, cx, cy);
+}
+
+// ============================================================
+// Sidebar update
+// ============================================================
+
+function updateSidebar() {
+  const list = document.getElementById('roadList');
+  list.innerHTML = '';
+  const sorted = Object.values(traffic).sort((a,b) => a.edge_id - b.edge_id);
+  for (const seg of sorted) {
+    const div  = document.createElement('div');
+    div.className = 'road-item';
+    div.innerHTML = `
+      <div class="road-dot" style="background:${COLORS[seg.color]}"></div>
+      <div class="road-name">${seg.road_name}</div>
+      <div class="road-speed">${seg.avg_speed_kmh} km/h</div>
+      <div class="road-badge badge-${seg.road_type}">${seg.road_type}</div>
+    `;
+    list.appendChild(div);
+  }
+}
+
+// ============================================================
+// Data fetching
+// ============================================================
+
+async function fetchAll() {
+  try {
+    const [vRes, tRes] = await Promise.all([
+      fetch(`${API}/vehicles`),
+      fetch(`${API}/traffic`),
+    ]);
+    vehicles = await vRes.json();
+    const tData = await tRes.json();
+    traffic = {};
+    for (const seg of tData.segments) traffic[seg.edge_id] = seg;
+
+    document.getElementById('statusDot').style.background = '#3fb950';
+    updateSidebar();
+    render();
+  } catch (e) {
+    document.getElementById('statusDot').style.background = '#f85149';
+    console.error('Fetch error', e);
+  }
+}
+
+async function fetchMap() {
+  const res  = await fetch(`${API}/map`);
+  mapData    = await res.json();
+  computeTransform();
+}
+
+// ============================================================
+// Tooltip on hover
+// ============================================================
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!vehicles.length) return;
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const tip = document.getElementById('tooltip');
+  let found = null;
+  for (const v of vehicles) {
+    const dx = wx(v.smooth_x) - mx;
+    const dy = wy(v.smooth_y) - my;
+    if (Math.sqrt(dx*dx + dy*dy) < 12) { found = v; break; }
+  }
+  if (found) {
+    tip.innerHTML = `
+      <b>${found.vehicle_id}</b><br>
+      Road: ${found.matched_road_name || 'Off-road'}<br>
+      Speed: ${found.speed_kmh} km/h<br>
+      Heading: ${found.heading_deg}°
+    `;
+    tip.style.left    = (e.clientX - rect.left + 12) + 'px';
+    tip.style.top     = (e.clientY - rect.top  - 10) + 'px';
+    tip.style.opacity = '1';
+  } else {
+    tip.style.opacity = '0';
+  }
+});
+
+// Legend canvases
+function drawLegendSwatches() {
+  (() => {
+    const c = document.getElementById('legendRaw');
+    const x = c.getContext('2d');
+    x.fillStyle = 'rgba(248,81,73,0.6)';
+    x.beginPath(); x.arc(5,5,4,0,Math.PI*2); x.fill();
+  })();
+  (() => {
+    const c = document.getElementById('legendSmooth');
+    const x = c.getContext('2d');
+    x.fillStyle = '#1f6feb';
+    x.strokeStyle = '#58a6ff';
+    x.lineWidth = 1.5;
+    x.beginPath(); x.arc(5,5,4,0,Math.PI*2); x.fill(); x.stroke();
+  })();
+}
+
+// ============================================================
+// Init
+// ============================================================
+
+window.addEventListener('resize', resize);
+
+(async () => {
+  resize();
+  await fetchMap();
+  await fetchAll();
+  drawLegendSwatches();
+  setInterval(fetchAll, POLL_MS);
+})();
+</script>
+</body>
+</html>
