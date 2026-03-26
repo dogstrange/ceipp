@@ -31,7 +31,7 @@ DT                = 1.0     # simulation tick in seconds
 SPEED_SCALE       = 0.1     # grid-units per second per km/h unit
                              # (120 km/h * 0.1 = 12 grid units/s)
 MOVING_AVG_WINDOW = 10      # samples for per-road moving average speed
-OBS_WINDOW        = 8       # HMM decoding window length
+OBS_WINDOW        = 12      # HMM decoding window length (matches HMMMapMatcher)
 
 # Traffic colour thresholds (km/h)
 GREEN_THRESH  = 60.0
@@ -200,9 +200,15 @@ class SimulationEngine:
             v.vx       = vx
             v.vy       = vy
 
-            # Heading: atan2(vy, vx) in degrees (0=East, CCW positive)
-            if abs(vx) > 0.01 or abs(vy) > 0.01:
-                v.heading_deg = math.degrees(math.atan2(vy, vx))
+            # Heading: derived from the TRUE edge direction + travel direction.
+            # Kalman velocity is too noisy for heading (15-unit GPS noise vs
+            # ~6-12 unit/tick movement creates large angular error).
+            # Edge direction is ground-truth and always correct.
+            dx = edge.bx - edge.ax
+            dy = edge.by - edge.ay
+            if v.direction == -1:
+                dx, dy = -dx, -dy
+            v.heading_deg = math.degrees(math.atan2(dy, dx))
 
             # 4. Append to HMM observation window and match
             v.obs_window.append((v.smooth_x, v.smooth_y))

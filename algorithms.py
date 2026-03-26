@@ -153,11 +153,11 @@ class HMMMapMatcher:
         self,
         graph: MapGraph,
         emission_sigma: float = 30.0,   # expected smoothed-GPS error (grid units)
-        p_stay: float       = 0.70,
-        p_adjacent: float   = 0.20,     # total, split across neighbours
-        p_offroad: float    = 0.02,
-        p_return: float     = 0.10,
-        window: int         = 8,
+        p_stay: float       = 0.88,     # high stay-prob prevents road jumping
+        p_adjacent: float   = 0.10,     # total, split across neighbours
+        p_offroad: float    = 0.005,
+        p_return: float     = 0.05,
+        window: int         = 12,       # longer window = more stable decoding
     ):
         self.graph = graph
         self.sigma = emission_sigma
